@@ -1,0 +1,46 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Virtual envs
+.venv/
+image_classifier/.venv/
+video_detector/.venv/
+
+# Data and artifacts
+image_classifier/data/
+image_classifier/artifacts/
+image_classifier/real-and-fake-face-detection/
+image_classifier/real-and-fake-face-detection.zip
+image_classifier/kaggle.json
+
+video_detector/data/
+video_detector/artifacts/
+
+# Model weights and logs
+*.pth
+*.pt
+*.joblib
+*.ckpt
+*.onnx
+
+# Videos and images (raw datasets)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.zip
+
+# Notebooks output
+*.nbconvert.ipynb
+
+# Misc
+logs/
+
