@@ -44,3 +44,4 @@ video_detector/artifacts/
 # Misc
 logs/
 
+video_detector/faceforensics_download_v4.py

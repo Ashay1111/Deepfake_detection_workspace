@@ -6,7 +6,10 @@ from pathlib import Path
 import csv
 
 import cv2
-import mediapipe as mp
+try:
+    import mediapipe as mp
+except Exception:
+    mp = None
 
 
 IMG_EXTS = {".jpg", ".jpeg", ".png"}
@@ -22,11 +25,14 @@ def crop_largest_face(image, detections, margin=0.2):
     best_area = 0
 
     for det in detections:
-        box = det.location_data.relative_bounding_box
-        x = int(box.xmin * w)
-        y = int(box.ymin * h)
-        bw = int(box.width * w)
-        bh = int(box.height * h)
+        if isinstance(det, dict):
+            x, y, bw, bh = det["x"], det["y"], det["w"], det["h"]
+        else:
+            box = det.location_data.relative_bounding_box
+            x = int(box.xmin * w)
+            y = int(box.ymin * h)
+            bw = int(box.width * w)
+            bh = int(box.height * h)
 
         # Expand by margin
         mx = int(bw * margin)
@@ -71,8 +77,14 @@ def main():
     log_path = Path(args.log)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    mp_face = mp.solutions.face_detection
-    detector = mp_face.FaceDetection(min_detection_confidence=args.min_conf, model_selection=1)
+    use_mediapipe = mp is not None and hasattr(mp, "solutions")
+    detector = None
+    haar = None
+    if use_mediapipe:
+        mp_face = mp.solutions.face_detection
+        detector = mp_face.FaceDetection(min_detection_confidence=args.min_conf, model_selection=1)
+    else:
+        haar = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
     with open(log_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["frame", "status", "reason"])
@@ -85,13 +97,22 @@ def main():
                 continue
 
             rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            results = detector.process(rgb)
+            detections = []
+            if detector is not None:
+                results = detector.process(rgb)
+                if results.detections:
+                    detections = results.detections
+            else:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                faces = haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+                for (x, y, w, h) in faces:
+                    detections.append({"x": x, "y": y, "w": w, "h": h})
 
-            if not results.detections:
+            if not detections:
                 writer.writerow({"frame": str(frame_path), "status": "fail", "reason": "no_face"})
                 continue
 
-            crop = crop_largest_face(img, results.detections, margin=args.margin)
+            crop = crop_largest_face(img, detections, margin=args.margin)
             if crop is None or crop.size == 0:
                 writer.writerow({"frame": str(frame_path), "status": "fail", "reason": "crop_empty"})
                 continue
@@ -103,7 +124,8 @@ def main():
 
             writer.writerow({"frame": str(frame_path), "status": "ok", "reason": ""})
 
-    detector.close()
+    if detector is not None:
+        detector.close()
     print(f"Done. Crops saved to: {faces_root}")
 
 
