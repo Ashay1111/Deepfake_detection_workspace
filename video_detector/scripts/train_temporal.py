@@ -162,6 +162,9 @@ def main():
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-pretrained", action="store_true")
+    parser.add_argument("--pos-weight", type=float, default=None, help="Override positive class weight.")
+    parser.add_argument("--balanced-sampling", action="store_true", help="Use balanced sampling.")
+    parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze backbone for N epochs.")
     parser.add_argument("--out", default=str(base_dir / "artifacts" / "temporal_model.pth"))
     parser.add_argument("--metrics-out", default=str(base_dir / "artifacts" / "temporal_metrics.json"))
     args = parser.parse_args()
@@ -185,16 +188,37 @@ def main():
     train_ds = FaceSequenceDataset(faces_root, splits_dir / "train.csv", "train", seq_len=args.seq_len, transform=tfms)
     val_ds = FaceSequenceDataset(faces_root, splits_dir / "val.csv", "val", seq_len=args.seq_len, transform=tfms)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    if args.balanced_sampling:
+        labels = [1 if row["label"] == "fake" else 0 for _, row in train_ds.rows.iterrows()]
+        counts = {0: max(labels.count(0), 1), 1: max(labels.count(1), 1)}
+        weights = [1.0 / counts[y] for y in labels]
+        sampler = torch.utils.data.WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
+    else:
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-    criterion = nn.BCEWithLogitsLoss()
+    if args.pos_weight is None:
+        pos_weight = None
+    else:
+        pos_weight = torch.tensor(args.pos_weight, dtype=torch.float32).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
     best_auc = -1.0
     os.makedirs(Path(args.out).parent, exist_ok=True)
 
     for epoch in range(1, args.epochs + 1):
+        if args.freeze_backbone_epochs > 0 and epoch <= args.freeze_backbone_epochs:
+            for p in model.backbone.parameters():
+                p.requires_grad = False
+            for p in model.lstm.parameters():
+                p.requires_grad = True
+            for p in model.head.parameters():
+                p.requires_grad = True
+        else:
+            for p in model.backbone.parameters():
+                p.requires_grad = True
         model.train()
         running_loss = 0.0
         for seqs, targets in train_loader:
